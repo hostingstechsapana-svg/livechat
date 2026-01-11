@@ -43,6 +43,16 @@ export async function GET(request: NextRequest) {
       }, { status: backendRes.status });
     }
 
+    const contentType = backendRes.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      console.error("Backend returned non-JSON response:", contentType);
+      return NextResponse.json({
+        success: false,
+        message: "Invalid response from backend",
+        data: null
+      }, { status: 500 });
+    }
+
     const data = await backendRes.json();
 
     return NextResponse.json({

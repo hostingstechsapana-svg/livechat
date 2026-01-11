@@ -27,8 +27,13 @@ export default function UserChat() {
       try {
         const res = await fetch('/api/chat/room');
         if (res.ok) {
-          const data = await res.json();
-          setSessionId(data.data.sessionId);
+          try {
+            const data = await res.json();
+            setSessionId(data.data.sessionId);
+          } catch (jsonErr) {
+            console.error("Failed to parse JSON:", jsonErr);
+            setSessionId("default-user-session");
+          }
         } else {
           // Fallback to default for anonymous
           setSessionId("default-user-session");
