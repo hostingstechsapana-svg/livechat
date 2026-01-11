@@ -165,7 +165,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -173,6 +172,7 @@ import com.ecommerce.app.entities.ChatMessage;
 import com.ecommerce.app.entities.ChatRoom;
 import com.ecommerce.app.repository.ChatMessageRepository;
 import com.ecommerce.app.repository.ChatRoomRepository;
+import com.ecommerce.app.repository.UserRepository;
 import com.ecommerce.app.requestDto.ChatMessageDTO;
 import com.ecommerce.app.requestDto.TypingEventDTO;
 import com.ecommerce.app.service.ChatService;
@@ -188,6 +188,7 @@ public class ChatController {
     private final ChatService chatService;
     private final ChatRoomRepository chatRoomRepository;
     private final ChatMessageRepository chatMessageRepository;
+    private final UserRepository userRepo;
 
     // ===============================
     // SEND MESSAGE
@@ -333,11 +334,19 @@ public class ChatController {
 
         Long userId = Long.parseLong(principal.getUsername());
 
+        // ✅ Try to find existing chat room, else create a new one
         ChatRoom room = chatRoomRepository
             .findByUserId(userId)
-            .orElseThrow(() -> new ResponseStatusException(
-                HttpStatus.NOT_FOUND, "Chat room not found"
-            ));
+            .orElseGet(() -> {
+                ChatRoom newRoom = ChatRoom.builder()
+                        .user(userRepo.findById(userId).orElseThrow(() -> 
+                            new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found")
+                        ))
+                        .closed(false)
+                        .sessionId("user-" + userId) // generate a session ID for the user
+                        .build();
+                return chatRoomRepository.save(newRoom);
+            });
 
         Page<ChatMessageEvent> page =
             chatMessageRepository.findByChatRoom(room, pageable)
