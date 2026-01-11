@@ -156,6 +156,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.messaging.Message;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
@@ -164,10 +165,9 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
-import org.springframework.messaging.Message;
-
 
 import com.ecommerce.app.entities.ChatMessage;
 import com.ecommerce.app.entities.ChatRoom;
@@ -177,6 +177,7 @@ import com.ecommerce.app.requestDto.ChatMessageDTO;
 import com.ecommerce.app.requestDto.TypingEventDTO;
 import com.ecommerce.app.service.ChatService;
 import com.ecommerce.app.websocket.ChatMessageEvent;
+
 import lombok.RequiredArgsConstructor;
 
 @RestController
@@ -317,14 +318,21 @@ public class ChatController {
     public Page<ChatRoom> getChatRooms(Pageable pageable) {
         return chatRoomRepository.findAll(pageable);
     }
-    
-    @GetMapping("/chats/me/messages")
+
+    @GetMapping("/api/chat/messages/me")
     public ResponseEntity<Page<ChatMessageEvent>> getMyMessages(
             Authentication auth,
             Pageable pageable
     ) {
-        Long userId = Long.parseLong(auth.getName());
-System.out.println(userId);
+        if (auth == null || !auth.isAuthenticated()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
+        }
+
+        org.springframework.security.core.userdetails.User principal =
+            (org.springframework.security.core.userdetails.User) auth.getPrincipal();
+
+        Long userId = Long.parseLong(principal.getUsername());
+
         ChatRoom room = chatRoomRepository
             .findByUserId(userId)
             .orElseThrow(() -> new ResponseStatusException(
@@ -344,5 +352,6 @@ System.out.println(userId);
 
         return ResponseEntity.ok(page);
     }
+
 }
 

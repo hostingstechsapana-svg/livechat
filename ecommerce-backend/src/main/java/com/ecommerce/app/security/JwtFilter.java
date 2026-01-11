@@ -91,10 +91,11 @@ public class JwtFilter extends OncePerRequestFilter {
         return uri.startsWith("/ws")
             || uri.startsWith("/app")
             || uri.startsWith("/topic")
-            || uri.startsWith("/chat")
+//            || uri.startsWith("/chat")
             || uri.startsWith("/api/v1/auth")
             || uri.startsWith("/api/public")
             || uri.startsWith("/login/oauth2")
+            || uri.startsWith("/chats/session")
             || uri.startsWith("/oauth2");
     }
 

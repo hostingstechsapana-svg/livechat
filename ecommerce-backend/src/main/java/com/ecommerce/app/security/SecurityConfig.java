@@ -47,7 +47,8 @@ public class SecurityConfig {
                     "/ws/**",
                     "/app/**",
                     "/topic/**",
-                    "/chat/**",
+//                    "/chat/**",
+                    "/chats/session/**",  
                     "/api/v1/auth/**",
                     "/api/public/**",
                     "/login/**",
@@ -55,6 +56,8 @@ public class SecurityConfig {
                     "/login/oauth2/**"   // Must permit OAuth callbacks
                 ).permitAll()
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                .requestMatchers("/api/chat/messages/me").authenticated()
+
                 .anyRequest().authenticated()
             )
             .oauth2Login(oauth -> oauth
