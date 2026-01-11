@@ -324,7 +324,7 @@ public class ChatController {
             Pageable pageable
     ) {
         Long userId = Long.parseLong(auth.getName());
-
+System.out.println(userId);
         ChatRoom room = chatRoomRepository
             .findByUserId(userId)
             .orElseThrow(() -> new ResponseStatusException(
