@@ -11,6 +11,7 @@ import com.ecommerce.app.entities.ChatMessage;
 import com.ecommerce.app.entities.ChatRoom;
 import com.ecommerce.app.repository.ChatMessageRepository;
 import com.ecommerce.app.repository.ChatRoomRepository;
+import com.ecommerce.app.repository.UserRepository;
 import com.ecommerce.app.requestDto.ChatMessageDTO;
 import com.ecommerce.app.requestDto.ChatRoomDTO;
 
@@ -25,35 +26,44 @@ public class ChatService {
     private final ChatRoomRepository chatRoomRepository;
     private final ChatMessageRepository chatMessageRepository;
     private final EmailService emailService;
+    private final UserRepository userRepo;
+    
+    public ChatMessage saveMessage(ChatMessageDTO dto, Long userId) {
 
-    public ChatMessage saveMessage(ChatMessageDTO dto) {
+        ChatRoom room = chatRoomRepository
+            .findBySessionId(dto.getSessionId())
+            .orElseGet(() -> chatRoomRepository.save(
+                ChatRoom.builder()
+                    .sessionId(dto.getSessionId())
+                    .closed(false)
+                    .build()
+            ));
 
-    	ChatRoom room = chatRoomRepository
-                .findBySessionId(dto.getSessionId())
-                .orElseGet(() -> chatRoomRepository.save(
-                        ChatRoom.builder()
-                        .sessionId(dto.getSessionId())
-                                .closed(false)
-                                .build()
-                ));
+        // ✅ Attach logged-in user ONCE
+        if (userId != null && room.getUser() == null) {
+        	userRepo.findById(userId)
+                .ifPresent(room::setUser);
+        }
 
-        //  update last activity
         room.setUpdatedAt(LocalDateTime.now());
         chatRoomRepository.save(room);
 
         ChatMessage message = ChatMessage.builder()
-                .chatRoom(room)
-                .message(dto.getMessage())
-                .sender(dto.getSender())
-                .status(MessageStatus.SENT)
-                .sentAt(LocalDateTime.now())
-                .build();
+            .chatRoom(room)
+            .message(dto.getMessage())
+            .sender(dto.getSender())
+            .status(MessageStatus.SENT)
+            .sentAt(LocalDateTime.now())
+            .build();
+
         ChatMessage saved = chatMessageRepository.save(message);
 
         handleAdminEmailNotification(saved);
 
         return saved;
     }
+
+
 
     public long countUnread(ChatRoom room) {
         return chatMessageRepository
@@ -81,15 +91,11 @@ public class ChatService {
     
     private void handleAdminEmailNotification(ChatMessage message) {
 
-        // 1️ only admin messages
         if (!"ADMIN".equals(message.getSender())) return;
 
         ChatRoom room = message.getChatRoom();
-
-        // 2️ guest?> no email
         if (room.getUser() == null) return;
 
-        // 3️ user offline? > send email
         if (!room.getUser().isOnline()) {
             emailService.sendNewMessageNotification(
                 room.getUser().getEmail()

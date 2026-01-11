@@ -1,6 +1,7 @@
 package com.ecommerce.app.websocket;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 
 import org.springframework.context.event.EventListener;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
@@ -8,7 +9,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.socket.messaging.SessionConnectEvent;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 
-import com.ecommerce.app.entities.User;
 import com.ecommerce.app.repository.UserRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -25,9 +25,11 @@ public class WebSocketPresenceListener {
         StompHeaderAccessor accessor = StompHeaderAccessor.wrap(
                 event.getMessage()
         );
+	
+        Map<String, Object> attrs = accessor.getSessionAttributes();
+        if (attrs == null) return;
 
-        Object userId = accessor.getSessionAttributes().get("userId");
-
+        Object userId = attrs.get("userId");
         if (userId == null) return; // guest user
 
         userRepository.findById(Long.valueOf(userId.toString()))
@@ -40,13 +42,11 @@ public class WebSocketPresenceListener {
     @EventListener
     public void handleDisconnect(SessionDisconnectEvent event) {
 
-        StompHeaderAccessor accessor = StompHeaderAccessor.wrap(
-                event.getMessage()
-        );
+        StompHeaderAccessor accessor = StompHeaderAccessor.wrap(event.getMessage());
+        if (accessor.getSessionAttributes() == null) return;
 
         Object userId = accessor.getSessionAttributes().get("userId");
-
-        if (userId == null) return; // guest user
+        if (userId == null) return;
 
         userRepository.findById(Long.valueOf(userId.toString()))
             .ifPresent(user -> {
@@ -54,5 +54,5 @@ public class WebSocketPresenceListener {
                 user.setLastSeen(LocalDateTime.now());
                 userRepository.save(user);
             });
-    }
+}
 }

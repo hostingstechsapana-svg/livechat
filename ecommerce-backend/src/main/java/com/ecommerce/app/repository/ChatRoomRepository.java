@@ -13,13 +13,16 @@ import com.ecommerce.app.entities.ChatRoom;
 @Repository
 public interface ChatRoomRepository extends JpaRepository<ChatRoom, Long> {
 
+    // Guest users
     Optional<ChatRoom> findBySessionId(String sessionId);
-
     boolean existsBySessionId(String sessionId);
+
+    // Logged-in users
+    Optional<ChatRoom> findByUserId(Long userId);
+
+    // Admin dashboard
     Page<ChatRoom> findByClosedFalse(Pageable pageable);
-
-    // Admin can see all active chats
     List<ChatRoom> findByClosedFalse();
-
 }
+
 
