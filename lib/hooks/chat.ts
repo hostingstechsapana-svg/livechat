@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { webSocketService } from "../services/websocket"; // your existing WS service
-import { ChatMessage } from "../types/chat";
+import { ChatMessage, ChatMessageEvent } from "../types/chat";
 
 export const useWebSocketChat = (sessionId?: string, isAdmin = false) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -137,34 +137,32 @@ export const useWebSocketChat = (sessionId?: string, isAdmin = false) => {
 
   // Load historical messages
   const loadMessages = useCallback(async (page = 0, limit = 50) => {
-    console.log('📚 Loading historical messages:', { sessionId: currentSessionId, page, limit });
+    console.log('📚 Loading historical messages:', { sessionId: currentSessionId, page, limit, isAdmin });
     try {
-      const res = await fetch(`/api/chat/messages/${currentSessionId}?page=${page}&limit=${limit}`);
-      const data = await res.json();
-      console.log('📄 API response:', data);
-      if (data.success) {
-        const historicalMessages = data.data.messages.map((msg: any) => ({
-          id: msg.id,
-          sessionId: msg.sessionId,
-          text: msg.text,
-          sender: msg.sender,
-          timestamp: new Date(msg.timestamp),
-        }));
-        console.log('📝 Historical messages loaded:', historicalMessages.length);
-        setMessages(prev => {
-          // Merge without duplicates - add older messages to the beginning
-          const existingIds = new Set(prev.map(m => m.id));
-          const newMessages = historicalMessages.filter((m: ChatMessage) => !existingIds.has(m.id));
-          console.log('📋 Messages after merge:', newMessages.length, 'new,', prev.length, 'existing');
-          return [...newMessages, ...prev];
-        });
-      } else {
-        console.log('❌ API returned success=false');
-      }
+      // Use session messages API for both admin and users
+      const apiUrl = `/api/chat/messages/${currentSessionId}?page=${page}&limit=${limit}`;
+      const res = await fetch(apiUrl);
+      const pageData = await res.json();
+      console.log('📄 API response:', pageData);
+      const historicalMessages = pageData.content.map((event: ChatMessageEvent) => ({
+        id: event.id,
+        sessionId: event.chatRoom?.sessionId || currentSessionId,
+        text: event.text,
+        sender: event.sender === 'ADMIN' ? 'admin' : 'user',
+        timestamp: new Date(event.sentAt),
+      }));
+      console.log('📝 Historical messages loaded:', historicalMessages.length);
+      setMessages(prev => {
+        // Merge without duplicates - add older messages to the beginning
+        const existingIds = new Set(prev.map(m => m.id));
+        const newMessages = historicalMessages.filter((m: ChatMessage) => !existingIds.has(m.id));
+        console.log('📋 Messages after merge:', newMessages.length, 'new,', prev.length, 'existing');
+        return [...newMessages, ...prev];
+      });
     } catch (err) {
       console.error("❌ Failed to load messages", err);
     }
-  }, [currentSessionId]);
+  }, [currentSessionId, isAdmin]);
 
 
   return {

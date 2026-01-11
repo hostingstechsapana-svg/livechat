@@ -5,6 +5,7 @@ import { sessionOptions, SessionData } from '@/lib/session';
 
 const BACKEND_URL = "http://localhost:8090";
 
+
 // Helper function to get auth headers
 function getAuthHeaders(session: SessionData) {
   return {

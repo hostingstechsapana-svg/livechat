@@ -42,42 +42,27 @@ export async function GET(
 
     if (!backendRes.ok) {
       console.error("Backend error:", backendRes.status);
+      if (backendRes.status === 404) {
+        return NextResponse.json({
+          content: [],
+          totalElements: 0,
+          number: page,
+          size: limit,
+          last: true
+        }, { status: 404 });
+      }
       return NextResponse.json({
-        success: true,
-        data: {
-          messages: [],
-          total: 0,
-          page,
-          limit,
-          hasMore: false
-        }
+        content: [],
+        totalElements: 0,
+        number: page,
+        size: limit,
+        last: true
       });
     }
 
     const data = await backendRes.json();
 
-    // Normalize messages - reverse order so oldest messages come first
-    const messages = (data.content || [])
-      .filter((msg: any) => msg.text && msg.text.trim())
-      .map((msg: any) => ({
-        id: msg.id,
-        sessionId: msg.sessionId,
-        text: msg.text,
-        sender: msg.sender === "ADMIN" ? "admin" : "user",
-        timestamp: new Date(msg.sentAt),
-      }))
-      .reverse(); // Reverse so oldest messages are first
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        messages,
-        total: data.totalElements,
-        page: data.number,
-        limit: data.size,
-        hasMore: !data.last
-      }
-    });
+    return NextResponse.json(data);
 
   } catch (error) {
     console.error("Error fetching messages:", error);

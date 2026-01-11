@@ -6,6 +6,7 @@ import { sessionOptions, SessionData } from '@/lib/session';
 const BACKEND_URL = "http://localhost:8090";
 
 
+
 // Helper function to get auth headers
 function getAuthHeaders(session: SessionData) {
   return {
@@ -30,51 +31,73 @@ export async function GET(request: NextRequest) {
       }, { status: 401 });
     }
 
-    const backendUrl = `${BACKEND_URL}/chats/me/messages?page=${page}&size=${limit}`;
+    // First, ensure the user has a chat room by calling the room endpoint
+    const roomUrl = `${BACKEND_URL}/chats/me/room`;
+    const roomRes = await fetch(roomUrl, {
+      method: "GET",
+      headers: getAuthHeaders(session),
+    });
 
+    if (!roomRes.ok) {
+      // If no room, try to create one (assuming backend handles authenticated room creation)
+      const createRoomRes = await fetch(`${BACKEND_URL}/chats/me/room`, {
+        method: "POST",
+        headers: getAuthHeaders(session),
+      });
+
+      if (!createRoomRes.ok) {
+        console.error("Failed to create chat room:", createRoomRes.status);
+        return NextResponse.json({
+          content: [],
+          totalElements: 0,
+          number: page,
+          size: limit,
+          last: true
+        }, { status: 404 });
+      }
+    }
+
+    const backendUrl = `${BACKEND_URL}/api/chat/messages/me?page=${page}&size=${limit}`;
     const backendRes = await fetch(backendUrl, {
       method: "GET",
       headers: getAuthHeaders(session),
     });
 
     if (!backendRes.ok) {
-      console.error("Backend error:", backendRes.status);
+      console.error("Backend error:", backendRes.status, await backendRes.text());
+      if (backendRes.status === 404) {
+        return NextResponse.json({
+          content: [],
+          totalElements: 0,
+          number: page,
+          size: limit,
+          last: true
+        }, { status: 404 });
+      }
       return NextResponse.json({
-        success: true,
-        data: {
-          messages: [],
-          total: 0,
-          page,
-          limit,
-          hasMore: false
-        }
+        content: [],
+        totalElements: 0,
+        number: page,
+        size: limit,
+        last: true
+      });
+    }
+
+    const contentType = backendRes.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      console.error("Invalid content-type:", contentType, "Response:", await backendRes.text());
+      return NextResponse.json({
+        content: [],
+        totalElements: 0,
+        number: page,
+        size: limit,
+        last: true
       });
     }
 
     const data = await backendRes.json();
 
-    // Normalize messages - reverse order so oldest messages come first
-    const messages = (data.content || [])
-      .filter((msg: any) => msg.message && msg.message.trim())
-      .map((msg: any) => ({
-        id: msg.id,
-        sessionId: msg.sessionId || 'user-chat',
-        text: msg.message,
-        sender: msg.sender === "ADMIN" ? "admin" : "user",
-        timestamp: new Date(msg.sentAt),
-      }))
-      .reverse(); // Reverse so oldest messages are first
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        messages,
-        total: data.totalElements,
-        page: data.number,
-        limit: data.size,
-        hasMore: !data.last
-      }
-    });
+    return NextResponse.json(data);
 
   } catch (error) {
     console.error("Error fetching user messages:", error);

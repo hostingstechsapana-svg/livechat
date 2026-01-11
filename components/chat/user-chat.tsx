@@ -16,10 +16,30 @@ interface ChatSession {
 }
 
 export default function UserChat() {
-  const [sessionId] = useState<string>("default-user-session");
+  const [sessionId, setSessionId] = useState<string>("");
 
   const { messages, sendMessage, isConnected, loadMessages } = useWebSocketChat(sessionId);
   const { typing: adminTyping, sendTyping } = useTypingIndicator(sessionId);
+
+  // Fetch sessionId for authenticated users
+  useEffect(() => {
+    const fetchSessionId = async () => {
+      try {
+        const res = await fetch('/api/chat/room');
+        if (res.ok) {
+          const data = await res.json();
+          setSessionId(data.data.sessionId);
+        } else {
+          // Fallback to default for anonymous
+          setSessionId("default-user-session");
+        }
+      } catch (err) {
+        console.error("Failed to fetch sessionId:", err);
+        setSessionId("default-user-session");
+      }
+    };
+    fetchSessionId();
+  }, []);
 
   const [inputValue, setInputValue] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
