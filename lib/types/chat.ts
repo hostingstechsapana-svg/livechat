@@ -6,7 +6,7 @@ export type SenderType = 'USER' | 'ADMIN';
 export interface ChatMessageEvent {
   id: number;
   sender: SenderType;
-  text: string;
+  message: string;
   sentAt: string;
   chatRoom: {
     id: number;
@@ -37,6 +37,7 @@ export interface ChatRoom {
   id: number;
   sessionId: string;
   createdAt: string;
+  updatedAt?: string;
   unreadCount?: number;
 }
 

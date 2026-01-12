@@ -10,20 +10,8 @@ class WebSocketService {
   private wsUrl: string;
 
   constructor() {
-    if (typeof window !== 'undefined') {
-      const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-      const hostname = window.location.hostname;
-      const port = 8090;
-
-      if (hostname === 'localhost' || hostname === '127.0.0.1') {
-        this.wsUrl = `${protocol}//localhost:${port}/ws`;
-      } else {
-        this.wsUrl = `${protocol}//${hostname}/ws`;
-      }
-    } else {
-      this.wsUrl = "https://e1b310ea0358.ngrok-free.app/ws";
-
-    }
+    // Always use localhost for development
+    this.wsUrl = `http://localhost:8090/ws`;
 
     console.log('🔌 WebSocket URL:', this.wsUrl);
   }
@@ -31,7 +19,7 @@ class WebSocketService {
   // =========================
   // CONNECT
   // =========================
-  async connect(): Promise<void> {
+  async connect(token?: string): Promise<void> {
     if (this.connectionPromise) return this.connectionPromise;
 
     console.log('🔌 Connecting WebSocket...');
@@ -45,6 +33,11 @@ class WebSocketService {
         const connectHeaders: any = {
           'accept-version': '1.0'
         };
+
+        if (token) {
+          connectHeaders['Authorization'] = `Bearer ${token}`;
+        }
+
         console.log('🔌 Connect headers:', connectHeaders);
 
         this.client = new Client({

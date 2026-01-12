@@ -82,7 +82,7 @@ export default function ChatSection() {
                     >
                       <p className="text-sm md:text-base font-medium">{message.text}</p>
                       <span className={`text-xs ${message.sender === "user" ? "text-red-100" : "text-gray-500"}`} suppressHydrationWarning={true}>
-                        {message.timestamp.toLocaleTimeString('en-US', {
+                        {new Date().toLocaleTimeString('en-US', {
                           hour: "2-digit",
                           minute: "2-digit",
                           hour12: false,

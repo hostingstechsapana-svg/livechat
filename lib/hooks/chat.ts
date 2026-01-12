@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { webSocketService } from "../services/websocket"; // your existing WS service
 import { ChatMessage, ChatMessageEvent } from "../types/chat";
+import { safeParseDate } from "../utils";
 
 export const useWebSocketChat = (sessionId?: string, isAdmin = false) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -25,8 +26,18 @@ export const useWebSocketChat = (sessionId?: string, isAdmin = false) => {
     const connectWebSocket = async () => {
       try {
         console.log('🔗 Attempting WebSocket connection...');
-        // Connect without token for both admin and user to allow anonymous chat
-        await webSocketService.connect();
+        // Get token if admin (assuming admin is authenticated)
+        let token: string | undefined;
+        if (isAdmin) {
+          const sessionRes = await fetch("/api/session");
+          if (sessionRes.ok) {
+            const sessionData = await sessionRes.json();
+            if (sessionData.success && sessionData.token) {
+              token = sessionData.token;
+            }
+          }
+        }
+        await webSocketService.connect(token);
         console.log('✅ WebSocket connection successful');
 
         if (!mounted) return;
@@ -54,12 +65,8 @@ export const useWebSocketChat = (sessionId?: string, isAdmin = false) => {
       console.log('💬 Processing received message:', JSON.stringify(payload, null, 2));
       console.log('🔍 Available fields in payload:', Object.keys(payload));
 
-      // Try different timestamp fields
-      const timestamp = payload.sentAt ? new Date(payload.sentAt) :
-                      payload.timestamp ? new Date(payload.timestamp) : new Date();
-      if (isNaN(timestamp.getTime())) {
-        console.warn("Invalid timestamp received:", payload.sentAt || payload.timestamp);
-      }
+      // Safely parse timestamp
+      const timestamp = safeParseDate(payload.sentAt || payload.timestamp);
 
       // Handle different possible field names for message text
       const messageText = payload.text || payload.message || payload.content || '';
@@ -96,47 +103,8 @@ export const useWebSocketChat = (sessionId?: string, isAdmin = false) => {
     };
   }, [connected, currentSessionId]);
 
-  // Send message
-  const sendMessage = useCallback(
-    (text: string) => {
-      console.log('🚀 sendMessage called:', { text, currentSessionId, isAdmin });
-      if (!text.trim() || (!currentSessionId && !isAdmin)) {
-        console.log('❌ Message not sent - validation failed');
-        return;
-      }
-
-      const sender = isAdmin ? "ADMIN" : "USER";
-      console.log('👤 Sender type:', sender);
-
-      // Create message object
-      const message: ChatMessage = {
-        id: Date.now(), // Temporary ID
-        sessionId: currentSessionId,
-        text,
-        sender: sender === "ADMIN" ? "admin" : "user",
-        timestamp: new Date(),
-      };
-
-      // Send via WebSocket
-      if (webSocketService.connected) {
-        console.log('🌐 WebSocket connected, sending message');
-        webSocketService.sendChatMessage(currentSessionId, text, sender);
-      } else {
-        console.log('❌ WebSocket not connected, adding locally');
-        // Add to messages immediately for local display
-        setMessages(prev => {
-          const newMessages = [...prev, message];
-          console.log('📋 Local messages after send:', newMessages.length, 'messages');
-          return newMessages;
-        });
-      }
-    },
-    [currentSessionId, isAdmin]
-  );
-
-
   // Load historical messages
-  const loadMessages = useCallback(async (page = 0, limit = 50) => {
+   const loadMessages = useCallback(async (page = 0, limit = 150) => {
     console.log('📚 Loading historical messages:', { sessionId: currentSessionId, page, limit, isAdmin });
     try {
       // Use session messages API for both admin and users
@@ -144,25 +112,59 @@ export const useWebSocketChat = (sessionId?: string, isAdmin = false) => {
       const res = await fetch(apiUrl);
       const pageData = await res.json();
       console.log('📄 API response:', pageData);
-      const historicalMessages = pageData.content.map((event: ChatMessageEvent) => ({
-        id: event.id,
-        sessionId: event.chatRoom?.sessionId || currentSessionId,
-        text: event.text,
-        sender: event.sender === 'ADMIN' ? 'admin' : 'user',
-        timestamp: new Date(event.sentAt),
-      }));
+      const historicalMessages = pageData.content.map((event: any) => {
+        // Handle different possible field names for message text
+        const messageText = event.message || event.text || event.content || '';
+        return {
+          id: event.id,
+          sessionId: event.chatRoom?.sessionId || currentSessionId,
+          text: messageText,
+          sender: event.sender === 'ADMIN' ? 'admin' : 'user',
+          timestamp: safeParseDate(event.sentAt),
+        };
+      });
       console.log('📝 Historical messages loaded:', historicalMessages.length);
       setMessages(prev => {
-        // Merge without duplicates - add older messages to the beginning
+        // Merge without duplicates
         const existingIds = new Set(prev.map(m => m.id));
         const newMessages = historicalMessages.filter((m: ChatMessage) => !existingIds.has(m.id));
         console.log('📋 Messages after merge:', newMessages.length, 'new,', prev.length, 'existing');
-        return [...newMessages, ...prev];
+        const allMessages = [...newMessages, ...prev];
+        // Sort by timestamp ascending (oldest first)
+        allMessages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+        return allMessages;
       });
     } catch (err) {
       console.error("❌ Failed to load messages", err);
     }
   }, [currentSessionId, isAdmin]);
+
+  // Send message
+  const sendMessage = useCallback(
+    async (text: string) => {
+      console.log('🚀 sendMessage called:', { text, currentSessionId, isAdmin });
+      if (!text.trim() || !currentSessionId) {
+        console.log('❌ Message not sent - validation failed');
+        return false;
+      }
+
+      const sender = isAdmin ? "ADMIN" : "USER";
+      console.log('👤 Sender type:', sender);
+
+      // Send via WebSocket
+      if (webSocketService.connected) {
+        console.log('🌐 WebSocket connected, sending message');
+        webSocketService.sendChatMessage(currentSessionId, text, sender);
+        // Reload messages after a short delay to ensure visibility
+        setTimeout(() => loadMessages(0, 50), 1000);
+        return true;
+      } else {
+        console.log('❌ WebSocket not connected, cannot send message');
+        return false;
+      }
+    },
+    [currentSessionId, isAdmin, loadMessages]
+  );
 
 
   return {

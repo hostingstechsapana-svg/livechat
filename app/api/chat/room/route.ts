@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Get user's chat room info
-    const backendUrl = `${BACKEND_URL}/chats/me/room`;
+    const backendUrl = `${BACKEND_URL}/api/chat/room`;
 
     const backendRes = await fetch(backendUrl, {
       method: "GET",

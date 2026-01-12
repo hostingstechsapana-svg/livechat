@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Send, User, Bot } from "lucide-react";
+import { formatMessageTime } from "@/lib/utils";
 
 interface AdminChatRoomProps {
   sessionId: string;
@@ -58,11 +59,16 @@ export default function AdminChatRoom({ sessionId, userName }: AdminChatRoomProp
   const displayedMessages = messages
     .filter(msg => msg.text && msg.text.trim());
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!inputValue.trim()) return;
-    sendMessage(inputValue);
-    setInputValue("");
-    sendTyping(false);
+    const success = await sendMessage(inputValue);
+    if (success) {
+      setInputValue("");
+      sendTyping(false);
+    } else {
+      // Could show a toast or error message here
+      console.warn("Message could not be sent");
+    }
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -124,7 +130,7 @@ export default function AdminChatRoom({ sessionId, userName }: AdminChatRoomProp
               </div>
               <div className="flex items-center gap-1 mt-1 px-1">
                 <span className="text-xs text-muted-foreground">
-                  {msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  {formatMessageTime(msg.timestamp)}
                 </span>
               </div>
             </div>
@@ -165,7 +171,11 @@ export default function AdminChatRoom({ sessionId, userName }: AdminChatRoomProp
           onKeyDown={handleKeyDown}
           className="flex-1 h-10 border border-gray-200 rounded-2xl focus:border-red-500 text-sm"
         />
-        <Button onClick={handleSendMessage} disabled={!inputValue.trim()} className="bg-red-600 hover:bg-red-700 text-white h-10 w-10 rounded-full">
+        <Button
+          onClick={handleSendMessage}
+          disabled={!inputValue.trim() || !isConnected}
+          className="bg-red-600 hover:bg-red-700 text-white h-10 w-10 rounded-full disabled:bg-gray-400"
+        >
           <Send className="w-4 h-4" />
         </Button>
       </div>

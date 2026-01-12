@@ -49,7 +49,7 @@ export async function GET(
           number: page,
           size: limit,
           last: true
-        }, { status: 404 });
+        }, { status: 200 });
       }
       return NextResponse.json({
         content: [],
