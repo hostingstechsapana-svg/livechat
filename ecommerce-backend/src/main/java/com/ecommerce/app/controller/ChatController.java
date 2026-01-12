@@ -153,7 +153,9 @@ package com.ecommerce.app.controller;
 import java.util.Optional;
 
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.Message;
@@ -165,6 +167,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -175,8 +178,10 @@ import com.ecommerce.app.repository.ChatRoomRepository;
 import com.ecommerce.app.repository.UserRepository;
 import com.ecommerce.app.requestDto.ChatMessageDTO;
 import com.ecommerce.app.requestDto.TypingEventDTO;
+import com.ecommerce.app.responseDto.ChatRoomResponse;
 import com.ecommerce.app.service.ChatService;
 import com.ecommerce.app.websocket.ChatMessageEvent;
+import com.ecommerce.app.websocket.ChatRoomMapper;
 
 import lombok.RequiredArgsConstructor;
 
@@ -194,51 +199,36 @@ public class ChatController {
     // SEND MESSAGE
     // ===============================
     @MessageMapping("/chat.send")
-    public void sendMessage(
-            ChatMessageDTO dto,
-            Message<?> message
-    ) {
-        StompHeaderAccessor accessor =
-            StompHeaderAccessor.wrap(message);
+    public void sendMessage(ChatMessageDTO dto, Message<?> message) {
+        StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
 
         Long userId = null;
-
         if (accessor.getSessionAttributes() != null) {
             Object uid = accessor.getSessionAttributes().get("userId");
-            if (uid != null) {
-                userId = Long.valueOf(uid.toString());
-            }
+            if (uid != null) userId = Long.valueOf(uid.toString());
         }
 
         ChatMessage saved = chatService.saveMessage(dto, userId);
-
         ChatRoom room = saved.getChatRoom();
 
         ChatMessageEvent event = new ChatMessageEvent(
-            saved.getId(),
-            room.getSessionId(),
-            saved.getSender(),
-            saved.getMessage(),
-            saved.getStatus(),
-            saved.getSentAt()
+                saved.getId(),
+                room.getSessionId(),
+                saved.getSender(),
+                saved.getMessage(),
+                saved.getStatus(),
+                saved.getSentAt()
         );
 
-        messagingTemplate.convertAndSend(
-            "/topic/chat/" + room.getSessionId(),
-            event
-        );
+        messagingTemplate.convertAndSend("/topic/chat/" + room.getSessionId(), event);
     }
-
 
     // ===============================
     // TYPING
     // ===============================
     @MessageMapping("/chat.typing")
     public void typing(TypingEventDTO dto) {
-        messagingTemplate.convertAndSend(
-                "/topic/typing/" + dto.getSessionId(),
-                dto
-        );
+        messagingTemplate.convertAndSend("/topic/typing/" + dto.getSessionId(), dto);
     }
 
     // ===============================
@@ -251,24 +241,23 @@ public class ChatController {
     }
 
     // ===============================
-    // CHAT HISTORY (USER ENDPOINT - ADDED)
+    // PUBLIC/GUEST CHAT HISTORY
     // ===============================
     @GetMapping("/chats/session/{sessionId}/messages")
     public ResponseEntity<Page<ChatMessageEvent>> getUserMessages(
             @PathVariable String sessionId,
-            Pageable pageable
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "100") int limit
     ) {
-        Optional<ChatRoom> optionalRoom =
-                chatRoomRepository.findBySessionId(sessionId);
-
+        Optional<ChatRoom> optionalRoom = chatRoomRepository.findBySessionId(sessionId);
         if (optionalRoom.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Page.empty());
         }
 
         ChatRoom room = optionalRoom.get();
+        Pageable pageable = PageRequest.of(page, limit, Sort.by("sentAt").descending());
 
-        Page<ChatMessageEvent> page = chatMessageRepository
-                .findByChatRoom(room, pageable)
+        Page<ChatMessageEvent> messages = chatMessageRepository.findByChatRoom(room, pageable)
                 .map(msg -> new ChatMessageEvent(
                         msg.getId(),
                         sessionId,
@@ -278,11 +267,90 @@ public class ChatController {
                         msg.getSentAt()
                 ));
 
-        return ResponseEntity.ok(page);
+        return ResponseEntity.ok(messages);
     }
 
     // ===============================
-    // CHAT HISTORY (ADMIN ENDPOINT)
+    // LOGGED-IN USER CHAT ROOM
+    // ===============================
+    @GetMapping("/api/chat/room")
+    public ResponseEntity<ChatRoomResponse> getMyChatRoom(Authentication auth) {
+        if (auth == null || !auth.isAuthenticated()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        Object principalObj = auth.getPrincipal();
+        if (!(principalObj instanceof org.springframework.security.core.userdetails.User principal)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        Long userId;
+        try {
+            userId = Long.parseLong(principal.getUsername());
+        } catch (NumberFormatException e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        var user = userRepo.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
+
+        ChatRoom room = chatRoomRepository.findByUserId(userId)
+                .orElseGet(() -> chatRoomRepository.save(
+                        ChatRoom.builder()
+                                .user(user)
+                                .closed(false)
+                                .sessionId("user-" + userId)
+                                .build()
+                ));
+
+        return ResponseEntity.ok(ChatRoomMapper.toResponse(room));
+    }
+
+    // ===============================
+    // LOGGED-IN USER MESSAGES
+    // ===============================
+    @GetMapping("/api/chat/messages/me")
+    public ResponseEntity<Page<ChatMessageEvent>> getMyMessages(
+            Authentication auth,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "100") int limit
+    ) {
+        if (auth == null || !auth.isAuthenticated()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
+        }
+
+        org.springframework.security.core.userdetails.User principal =
+                (org.springframework.security.core.userdetails.User) auth.getPrincipal();
+
+        Long userId = Long.parseLong(principal.getUsername());
+
+        ChatRoom room = chatRoomRepository.findByUserId(userId)
+                .orElseGet(() -> chatRoomRepository.save(
+                        ChatRoom.builder()
+                                .user(userRepo.findById(userId).orElseThrow(() ->
+                                        new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found")))
+                                .closed(false)
+                                .sessionId("user-" + userId)
+                                .build()
+                ));
+
+        Pageable pageable = PageRequest.of(page, limit, Sort.by("sentAt").descending());
+
+        Page<ChatMessageEvent> messages = chatMessageRepository.findByChatRoom(room, pageable)
+                .map(msg -> new ChatMessageEvent(
+                        msg.getId(),
+                        room.getSessionId(),
+                        msg.getSender(),
+                        msg.getMessage(),
+                        msg.getStatus(),
+                        msg.getSentAt()
+                ));
+
+        return ResponseEntity.ok(messages);
+    }
+
+    // ===============================
+    // ADMIN CHAT HISTORY
     // ===============================
     @GetMapping("/api/admin/chats/session/{sessionId}/messages")
     @PreAuthorize("hasRole('ADMIN')")
@@ -290,17 +358,10 @@ public class ChatController {
             @PathVariable String sessionId,
             Pageable pageable
     ) {
-        Optional<ChatRoom> optionalRoom =
-                chatRoomRepository.findBySessionId(sessionId);
+        ChatRoom room = chatRoomRepository.findBySessionId(sessionId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
 
-        if (optionalRoom.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Page.empty());
-        }
-
-        ChatRoom room = optionalRoom.get();
-
-        Page<ChatMessageEvent> page = chatMessageRepository
-                .findByChatRoom(room, pageable)
+        Page<ChatMessageEvent> messages = chatMessageRepository.findByChatRoom(room, pageable)
                 .map(msg -> new ChatMessageEvent(
                         msg.getId(),
                         sessionId,
@@ -310,57 +371,16 @@ public class ChatController {
                         msg.getSentAt()
                 ));
 
-        return ResponseEntity.ok(page);
+        return ResponseEntity.ok(messages);
     }
-
 
     @GetMapping("/api/admin/chats")
     @PreAuthorize("hasRole('ADMIN')")
-    public Page<ChatRoom> getChatRooms(Pageable pageable) {
-        return chatRoomRepository.findAll(pageable);
-    }
-
-    @GetMapping("/api/chat/messages/me")
-    public ResponseEntity<Page<ChatMessageEvent>> getMyMessages(
-            Authentication auth,
-            Pageable pageable
-    ) {
-        if (auth == null || !auth.isAuthenticated()) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
-        }
-
-        org.springframework.security.core.userdetails.User principal =
-            (org.springframework.security.core.userdetails.User) auth.getPrincipal();
-
-        Long userId = Long.parseLong(principal.getUsername());
-
-        // ✅ Try to find existing chat room, else create a new one
-        ChatRoom room = chatRoomRepository
-            .findByUserId(userId)
-            .orElseGet(() -> {
-                ChatRoom newRoom = ChatRoom.builder()
-                        .user(userRepo.findById(userId).orElseThrow(() -> 
-                            new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found")
-                        ))
-                        .closed(false)
-                        .sessionId("user-" + userId) // generate a session ID for the user
-                        .build();
-                return chatRoomRepository.save(newRoom);
-            });
-
-        Page<ChatMessageEvent> page =
-            chatMessageRepository.findByChatRoom(room, pageable)
-                .map(msg -> new ChatMessageEvent(
-                    msg.getId(),
-                    room.getSessionId(),
-                    msg.getSender(),
-                    msg.getMessage(),
-                    msg.getStatus(),
-                    msg.getSentAt()
-                ));
-
-        return ResponseEntity.ok(page);
+    public Page<ChatRoomResponse> getChatRooms(Pageable pageable) {
+        return chatRoomRepository.findAll(pageable)
+                .map(ChatRoomMapper::toResponse);
     }
 
 }
+
 
