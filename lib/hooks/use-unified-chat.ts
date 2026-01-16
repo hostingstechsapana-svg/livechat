@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ChatMessage, ChatMessageEvent } from "../types/chat";
 import { safeParseDate } from "../utils";
-import { webSocketService } from "../services/websocket";
+import { webSocketService } from "../services/legacy-websocket"; // legacy service
 
 interface UseUnifiedChatReturn {
   messages: ChatMessage[];
@@ -31,6 +31,7 @@ export function useUnifiedChat(): UseUnifiedChatReturn {
   const [hasMore, setHasMore] = useState(true);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [userRole, setUserRole] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
   const [typing, setTyping] = useState(false);
 
@@ -43,14 +44,14 @@ export function useUnifiedChat(): UseUnifiedChatReturn {
       const res = await fetch("/api/session");
       if (res.ok) {
         const data = await res.json();
-        setIsAuthenticated(data.success);
-        return data.success;
+        setIsAuthenticated(data.success && data.role !== undefined);
+        return { isAuthenticated: data.success, role: data.role };
       }
     } catch (err) {
       console.error("Failed to check auth status:", err);
     }
     setIsAuthenticated(false);
-    return false;
+    return { isAuthenticated: false, role: null };
   }, []);
 
   // Generate guest session ID
@@ -60,8 +61,10 @@ export function useUnifiedChat(): UseUnifiedChatReturn {
 
   // Initialize session
   const initializeSession = useCallback(async () => {
-    const auth = await checkAuthStatus();
-    if (auth) {
+    const authStatus = await checkAuthStatus();
+    if (authStatus.isAuthenticated) {
+      setUserRole(authStatus.role);
+      setIsAuthenticated(true);
       // For authenticated users, fetch actual sessionId from backend
       try {
         const res = await fetch('/api/chat/room');
@@ -69,7 +72,6 @@ export function useUnifiedChat(): UseUnifiedChatReturn {
           const data = await res.json();
           if (data.success && data.data.sessionId) {
             setSessionId(data.data.sessionId);
-            setIsAuthenticated(true);
             return;
           }
         }
@@ -78,16 +80,16 @@ export function useUnifiedChat(): UseUnifiedChatReturn {
       }
       // Fallback
       setSessionId('default-user-session');
-      setIsAuthenticated(true);
     } else {
       // For guest
+      setUserRole(null);
+      setIsAuthenticated(false);
       let guestSession = localStorage.getItem(GUEST_SESSION_KEY);
       if (!guestSession) {
         guestSession = generateGuestSessionId();
         localStorage.setItem(GUEST_SESSION_KEY, guestSession);
       }
       setSessionId(guestSession);
-      setIsAuthenticated(false);
     }
   }, [checkAuthStatus, generateGuestSessionId]);
 
@@ -237,26 +239,24 @@ export function useUnifiedChat(): UseUnifiedChatReturn {
       return false;
     }
 
-    const sender = "USER"; // All users send as USER
+    const sender: 'USER' | 'ADMIN' = userRole === 'ADMIN' ? 'ADMIN' : 'USER';
 
     // Send via WebSocket
     if (webSocketService.connected) {
       webSocketService.sendChatMessage(sessionId, text, sender);
-      // Reload messages after a short delay to ensure visibility
-      setTimeout(() => loadMessages(0, 100), 1000);
       return true;
     } else {
       console.warn('WebSocket not connected, cannot send message');
       return false;
     }
-  }, [sessionId, loadMessages]);
+  }, [sessionId, userRole]);
 
   // Send typing indicator
   const sendTyping = useCallback((typingStatus: boolean) => {
     if (!webSocketService.connected || !sessionId) return;
-    const sender = "USER"; // Public chat users send as USER
+    const sender: 'USER' | 'ADMIN' = userRole === 'ADMIN' ? 'ADMIN' : 'USER';
     webSocketService.sendTyping(sessionId, sender, typingStatus);
-  }, [sessionId]);
+  }, [sessionId, userRole]);
 
   // Initialize on mount
   useEffect(() => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { webSocketService } from "../services/websocket"; // your existing WS service
+import { webSocketService } from "../services/legacy-websocket"; // legacy WS service
 import { ChatMessage, ChatMessageEvent } from "../types/chat";
 import { safeParseDate } from "../utils";
 
@@ -37,7 +37,7 @@ export const useWebSocketChat = (sessionId?: string, isAdmin = false) => {
             }
           }
         }
-        await webSocketService.connect(token);
+        await webSocketService.connect(token || undefined);
         console.log('✅ WebSocket connection successful');
 
         if (!mounted) return;
@@ -82,7 +82,17 @@ export const useWebSocketChat = (sessionId?: string, isAdmin = false) => {
       console.log('📝 Adding message to state:', chatMsg);
       if (chatMsg.text && chatMsg.text.trim()) {
         setMessages(prev => {
-          const newMessages = [...prev, chatMsg];
+          // Remove any optimistic messages that match this real message
+          const filtered = prev.filter(m =>
+            !(m.id < 0 && m.text === chatMsg.text && m.sender === chatMsg.sender)
+          );
+          // Check if message with this ID already exists
+          const exists = filtered.some(m => m.id === chatMsg.id);
+          if (exists) {
+            console.log('📋 Message already exists, skipping:', chatMsg.id);
+            return filtered;
+          }
+          const newMessages = [...filtered, chatMsg];
           console.log('📋 Updated messages state:', newMessages.length, 'messages');
           return newMessages;
         });
@@ -129,9 +139,15 @@ export const useWebSocketChat = (sessionId?: string, isAdmin = false) => {
         const existingIds = new Set(prev.map(m => m.id));
         const newMessages = historicalMessages.filter((m: ChatMessage) => !existingIds.has(m.id));
         console.log('📋 Messages after merge:', newMessages.length, 'new,', prev.length, 'existing');
-        const allMessages = [...newMessages, ...prev];
+        let allMessages = [...newMessages, ...prev];
         // Sort by timestamp ascending (oldest first)
         allMessages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+        // Remove optimistic messages that have a matching real message
+        allMessages = allMessages.filter(m => {
+          if (m.id >= 0) return true;
+          const hasMatchingReal = allMessages.some(real => real.id > 0 && real.text === m.text && real.sender === m.sender);
+          return !hasMatchingReal;
+        });
         return allMessages;
       });
     } catch (err) {
@@ -151,15 +167,28 @@ export const useWebSocketChat = (sessionId?: string, isAdmin = false) => {
       const sender = isAdmin ? "ADMIN" : "USER";
       console.log('👤 Sender type:', sender);
 
+      // Optimistically add the message to UI immediately
+      const optimisticMessage: ChatMessage = {
+        id: -Date.now(),
+        sessionId: currentSessionId,
+        text,
+        sender: isAdmin ? "admin" : "user",
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, optimisticMessage]);
+
       // Send via WebSocket
       if (webSocketService.connected) {
         console.log('🌐 WebSocket connected, sending message');
         webSocketService.sendChatMessage(currentSessionId, text, sender);
-        // Reload messages after a short delay to ensure visibility
+
+        // Reload messages after a short delay to ensure the message is loaded if WebSocket fails
         setTimeout(() => loadMessages(0, 50), 1000);
         return true;
       } else {
         console.log('❌ WebSocket not connected, cannot send message');
+        // Remove optimistic message if send failed
+        setMessages(prev => prev.filter(m => m.id !== optimisticMessage.id));
         return false;
       }
     },
