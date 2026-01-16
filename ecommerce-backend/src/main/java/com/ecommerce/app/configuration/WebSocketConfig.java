@@ -40,5 +40,4 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         registration.interceptors(webSocketAuthInterceptor);
         registration.taskExecutor().corePoolSize(4).maxPoolSize(8).queueCapacity(100);
     }
-
 }

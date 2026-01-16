@@ -162,6 +162,7 @@ import org.springframework.messaging.Message;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -177,10 +178,10 @@ import com.ecommerce.app.repository.ChatMessageRepository;
 import com.ecommerce.app.repository.ChatRoomRepository;
 import com.ecommerce.app.repository.UserRepository;
 import com.ecommerce.app.requestDto.ChatMessageDTO;
+import com.ecommerce.app.websocket.ChatMessageEvent;
 import com.ecommerce.app.requestDto.TypingEventDTO;
 import com.ecommerce.app.responseDto.ChatRoomResponse;
 import com.ecommerce.app.service.ChatService;
-import com.ecommerce.app.websocket.ChatMessageEvent;
 import com.ecommerce.app.websocket.ChatRoomMapper;
 
 import lombok.RequiredArgsConstructor;
@@ -194,6 +195,7 @@ public class ChatController {
     private final ChatRoomRepository chatRoomRepository;
     private final ChatMessageRepository chatMessageRepository;
     private final UserRepository userRepo;
+    
 
     // ===============================
     // SEND MESSAGE
@@ -222,6 +224,47 @@ public class ChatController {
 
         messagingTemplate.convertAndSend("/topic/chat/" + room.getSessionId(), event);
     }
+    
+    @MessageMapping("/chat.send.public")
+    public void sendPublic(ChatMessageDTO dto, Message<?> message) {
+
+        StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
+        String wsSessionId =
+            (String) accessor.getSessionAttributes().get("sessionId");
+
+        if (!dto.getSessionId().equals(wsSessionId)) {
+            throw new AccessDeniedException("Invalid session");
+        }
+
+        ChatMessage saved =
+            chatService.savePublicMessage(dto);
+
+        messagingTemplate.convertAndSend(
+            "/topic/chat/" + dto.getSessionId(),
+            ChatMessageEvent.from(saved)
+        );
+    }
+    
+    @MessageMapping("/chat.send.user")
+    public void sendUser(ChatMessageDTO dto, Message<?> message) {
+
+        StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
+        Long userId =
+            (Long) accessor.getSessionAttributes().get("userId");
+
+        if (userId == null) {
+            throw new AccessDeniedException("Not authenticated");
+        }
+
+        ChatMessage saved =
+            chatService.saveUserMessage(dto.getMessage(), userId);
+
+        messagingTemplate.convertAndSend(
+            "/topic/chat/user/" + userId,
+            ChatMessageEvent.from(saved)
+        );
+    }
+
 
     // ===============================
     // TYPING
